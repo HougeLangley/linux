@@ -10,8 +10,7 @@
 #include <linux/phy.h>
 
 #define PHY_ID_YT8511		0x0000010a
-#define PHY_ID_YT8521 		0x0000011a
-#define MOTORCOMM_PHY_ID_MASK 	0x00000fff
+#define PHY_ID_YT8521		0x0000011a
 
 #define YT8511_PAGE_SELECT	0x1e
 #define YT8511_PAGE		0x1f
@@ -40,52 +39,49 @@
 #define YT8511_DELAY_FE_TX_EN	(0xf << 12)
 #define YT8511_DELAY_FE_TX_DIS	(0x2 << 12)
 
-#define YT8521_SLEEP_SW_EN 	BIT(15)
-#define YT8521_LINK_STATUS 	BIT(10)
-#define YT8521_DUPLEX 		0x2000
-#define YT8521_SPEED_MODE 	0xc000
-#define YTPHY_REG_SPACE_UTP 	0
-#define YTPHY_REG_SPACE_FIBER 	2
-#define REG_PHY_SPEC_STATUS 	0x11
+#define YT8521_SLEEP_SW_EN	BIT(15)
+#define YT8521_LINK_STATUS	BIT(10)
+#define YT8521_DUPLEX		0x2000
+#define YT8521_SPEED_MODE	0xc000
+#define YTPHY_REG_SPACE_UTP	0
+#define YTPHY_REG_SPACE_FIBER	2
+#define REG_PHY_SPEC_STATUS	0x11
 /* based on yt8521 wol config register */
-#define YTPHY_UTP_INTR_REG 	0x12
+#define YTPHY_UTP_INTR_REG	0x12
 
-#define SYS_WAKEUP_BASED_ON_ETH_PKT 	0
+#define SYS_WAKEUP_BASED_ON_ETH_PKT	0
 
 /* to enable system WOL of phy, please define this macro to 1
  * otherwise, define it to 0.
  */
-#define YTPHY_ENABLE_WOL 	0
+#define YTPHY_ENABLE_WOL		0
 
-#if (YTPHY_ENABLE_WOL)
-	#undef SYS_WAKEUP_BASED_ON_ETH_PKT
-	#define SYS_WAKEUP_BASED_ON_ETH_PKT     1
+#if YTPHY_ENABLE_WOL
+#undef SYS_WAKEUP_BASED_ON_ETH_PKT
+#define SYS_WAKEUP_BASED_ON_ETH_PKT	1
 #endif
 
-#if (YTPHY_ENABLE_WOL)
-enum ytphy_wol_type_e {
+#if YTPHY_ENABLE_WOL
+enum ytphy_wol_type {
 	YTPHY_WOL_TYPE_LEVEL,
 	YTPHY_WOL_TYPE_PULSE,
 	YTPHY_WOL_TYPE_MAX
 };
-typedef enum ytphy_wol_type_e ytphy_wol_type_t;
 
-enum ytphy_wol_width_e {
+enum ytphy_wol_width {
 	YTPHY_WOL_WIDTH_84MS,
 	YTPHY_WOL_WIDTH_168MS,
 	YTPHY_WOL_WIDTH_336MS,
 	YTPHY_WOL_WIDTH_672MS,
 	YTPHY_WOL_WIDTH_MAX
 };
-typedef enum ytphy_wol_width_e ytphy_wol_width_t;
 
-struct ytphy_wol_cfg_s {
+struct ytphy_wol_cfg {
 	int enable;
 	int type;
 	int width;
 };
-typedef struct ytphy_wol_cfg_s ytphy_wol_cfg_t;
-#endif /*(YTPHY_ENABLE_WOL)*/
+#endif /* YTPHY_ENABLE_WOL */
 
 static int yt8511_read_page(struct phy_device *phydev)
 {
@@ -160,94 +156,65 @@ err_restore_page:
 	return phy_restore_page(phydev, oldpage, ret);
 }
 
-int genphy_config_init(struct phy_device *phydev)
+static int __maybe_unused ytphy_read_ext(struct phy_device *phydev, int page)
 {
-	return genphy_read_abilities(phydev);
+	return phy_read_paged(phydev, page, YT8511_PAGE);
 }
 
-static int ytphy_read_ext(struct phy_device *phydev, u32 regnum)
+static int ytphy_write_ext(struct phy_device *phydev, int page, u16 val)
 {
-	int ret;
-	int val;
-
-	ret = phy_write(phydev, YT8511_PAGE_SELECT, regnum);
-	if (ret < 0)
-		return ret;
-
-	val = phy_read(phydev, YT8511_PAGE);
-
-	return val;
+	return phy_write_paged(phydev, page, YT8511_PAGE, val);
 }
 
-static int ytphy_write_ext(struct phy_device *phydev, u32 regnum, u16 val)
+static int ytphy_modify_ext(struct phy_device *phydev, int page, u16 mask, u16 val)
 {
-	int ret;
-
-	ret = phy_write(phydev, YT8511_PAGE_SELECT, regnum);
-	if (ret < 0)
-		return ret;
-
-	ret = phy_write(phydev, YT8511_PAGE, val);
-
-	return ret;
+	return phy_modify_paged(phydev, page, YT8511_PAGE, mask, val);
 }
 
-int yt8521_soft_reset(struct phy_device *phydev)
+static int yt8521_soft_reset(struct phy_device *phydev)
 {
-	int ret, val;
+	ytphy_modify_ext(phydev, 0xa001, 0x8000, 0);
 
-	val = ytphy_read_ext(phydev, 0xa001);
-	ytphy_write_ext(phydev, 0xa001, (val & ~0x8000));
-
-	ret = genphy_soft_reset(phydev);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return genphy_soft_reset(phydev);
 }
 
-#if (YTPHY_ENABLE_WOL)
+#if YTPHY_ENABLE_WOL
 static int ytphy_switch_reg_space(struct phy_device *phydev, int space)
 {
-	int ret;
-
 	if (space == YTPHY_REG_SPACE_UTP)
-		ret = ytphy_write_ext(phydev, 0xa000, 0);
-	else
-		ret = ytphy_write_ext(phydev, 0xa000, 2);
+		return ytphy_write_ext(phydev, 0xa000, 0);
 
-	return ret;
+	return ytphy_write_ext(phydev, 0xa000, 2);
 }
 
-static int ytphy_wol_en_cfg(struct phy_device *phydev, ytphy_wol_cfg_t wol_cfg)
+static int ytphy_wol_en_cfg(struct phy_device *phydev, struct ytphy_wol_cfg *wol_cfg)
 {
-	int ret=0;
-	int val=0;
+	int val;
 
 	val = ytphy_read_ext(phydev, YTPHY_WOL_CFG_REG);
 	if (val < 0)
 		return val;
 
-	if(wol_cfg.enable) {
+	if (wol_cfg->enable) {
 		val |= YTPHY_WOL_CFG_EN;
 
-		if(wol_cfg.type == YTPHY_WOL_TYPE_LEVEL) {
+		if (wol_cfg->type == YTPHY_WOL_TYPE_LEVEL) {
 			val &= ~YTPHY_WOL_CFG_TYPE;
 			val &= ~YTPHY_WOL_CFG_INTR_SEL;
-		} else if(wol_cfg.type == YTPHY_WOL_TYPE_PULSE) {
+		} else if (wol_cfg->type == YTPHY_WOL_TYPE_PULSE) {
 			val |= YTPHY_WOL_CFG_TYPE;
 			val |= YTPHY_WOL_CFG_INTR_SEL;
 
-			if(wol_cfg.width == YTPHY_WOL_WIDTH_84MS) {
+			if (wol_cfg->width == YTPHY_WOL_WIDTH_84MS) {
 				val &= ~YTPHY_WOL_CFG_WIDTH1;
 				val &= ~YTPHY_WOL_CFG_WIDTH2;
-			} else if(wol_cfg.width == YTPHY_WOL_WIDTH_168MS) {
+			} else if (wol_cfg->width == YTPHY_WOL_WIDTH_168MS) {
 				val |= YTPHY_WOL_CFG_WIDTH1;
 				val &= ~YTPHY_WOL_CFG_WIDTH2;
-			} else if(wol_cfg.width == YTPHY_WOL_WIDTH_336MS) {
+			} else if (wol_cfg->width == YTPHY_WOL_WIDTH_336MS) {
 				val &= ~YTPHY_WOL_CFG_WIDTH1;
 				val |= YTPHY_WOL_CFG_WIDTH2;
-			} else if(wol_cfg.width == YTPHY_WOL_WIDTH_672MS) {
+			} else if (wol_cfg->width == YTPHY_WOL_WIDTH_672MS) {
 				val |= YTPHY_WOL_CFG_WIDTH1;
 				val |= YTPHY_WOL_CFG_WIDTH2;
 			}
@@ -257,11 +224,7 @@ static int ytphy_wol_en_cfg(struct phy_device *phydev, ytphy_wol_cfg_t wol_cfg)
 		val &= ~YTPHY_WOL_CFG_INTR_SEL;
 	}
 
-	ret = ytphy_write_ext(phydev, YTPHY_WOL_CFG_REG, val);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return ytphy_write_ext(phydev, YTPHY_WOL_CFG_REG, val);
 }
 
 static void ytphy_get_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol)
@@ -277,17 +240,14 @@ static void ytphy_get_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol
 
 	if (val & YTPHY_WOL_CFG_EN)
 		wol->wolopts |= WAKE_MAGIC;
-
-	return;
 }
 
 static int ytphy_set_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol)
 {
-	int ret, pre_page, val;
-	ytphy_wol_cfg_t wol_cfg;
+	struct ytphy_wol_cfg wol_cfg = {};
 	struct net_device *p_attached_dev = phydev->attached_dev;
+	int ret, pre_page, val;
 
-	memset(&wol_cfg,0,sizeof(ytphy_wol_cfg_t));
 	pre_page = ytphy_read_ext(phydev, 0xa000);
 	if (pre_page < 0)
 		return pre_page;
@@ -307,93 +267,72 @@ static int ytphy_set_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol)
 
 		/* Set the WOL config */
 		wol_cfg.enable = 1; //enable
-		wol_cfg.type= YTPHY_WOL_TYPE_PULSE;
-		wol_cfg.width= YTPHY_WOL_WIDTH_672MS;
-		ret = ytphy_wol_en_cfg(phydev, wol_cfg);
+		wol_cfg.type = YTPHY_WOL_TYPE_PULSE;
+		wol_cfg.width = YTPHY_WOL_WIDTH_672MS;
+		ret = ytphy_wol_en_cfg(phydev, &wol_cfg);
 		if (ret < 0)
 			return ret;
 
 		/* Store the device address for the magic packet */
 		ret = ytphy_write_ext(phydev, YTPHY_MAGIC_PACKET_MAC_ADDR2,
-				((p_attached_dev->dev_addr[0] << 8) |
-				 p_attached_dev->dev_addr[1]));
+				      ((p_attached_dev->dev_addr[0] << 8) |
+					p_attached_dev->dev_addr[1]));
 		if (ret < 0)
 			return ret;
+
 		ret = ytphy_write_ext(phydev, YTPHY_MAGIC_PACKET_MAC_ADDR1,
-				((p_attached_dev->dev_addr[2] << 8) |
-				 p_attached_dev->dev_addr[3]));
+				      ((p_attached_dev->dev_addr[2] << 8) |
+					p_attached_dev->dev_addr[3]));
 		if (ret < 0)
 			return ret;
+
 		ret = ytphy_write_ext(phydev, YTPHY_MAGIC_PACKET_MAC_ADDR0,
-				((p_attached_dev->dev_addr[4] << 8) |
-				 p_attached_dev->dev_addr[5]));
+				      ((p_attached_dev->dev_addr[4] << 8) |
+					p_attached_dev->dev_addr[5]));
 		if (ret < 0)
 			return ret;
 	} else {
 		wol_cfg.enable = 0; //disable
-		wol_cfg.type= YTPHY_WOL_TYPE_MAX;
-		wol_cfg.width= YTPHY_WOL_WIDTH_MAX;
-		ret = ytphy_wol_en_cfg(phydev, wol_cfg);
+		wol_cfg.type = YTPHY_WOL_TYPE_MAX;
+		wol_cfg.width = YTPHY_WOL_WIDTH_MAX;
+		ret = ytphy_wol_en_cfg(phydev, &wol_cfg);
 		if (ret < 0)
 			return ret;
 	}
 
 	/* Recover to previous register space page */
-	ret = ytphy_switch_reg_space(phydev, pre_page);
-	if (ret < 0)
-		return ret;
-
-	return 0;
+	return ytphy_switch_reg_space(phydev, pre_page);
 }
-#endif /*(YTPHY_ENABLE_WOL)*/
+#endif /* YTPHY_ENABLE_WOL */
 
 static int yt8521_config_init(struct phy_device *phydev)
 {
 	int ret;
-	int val;
 
 	phydev->irq = PHY_POLL;
 
 	ytphy_write_ext(phydev, 0xa000, 0);
 
-	ret = genphy_config_init(phydev);
+	ret = genphy_read_abilities(phydev);
 	if (ret < 0)
 		return ret;
 
 	/* disable auto sleep */
-	val = ytphy_read_ext(phydev, YT8511_EXT_SLEEP_CTRL);
-	if (val < 0)
-		return val;
-
-	val &= ~YT8521_SLEEP_SW_EN;
-
-	ret = ytphy_write_ext(phydev, YT8511_EXT_SLEEP_CTRL, val);
+	ret = ytphy_modify_ext(phydev, YT8511_EXT_SLEEP_CTRL, YT8521_SLEEP_SW_EN, 0);
 	if (ret < 0)
 		return ret;
 
 	/*  enable tx delay 450ps per step */
-	val = ytphy_read_ext(phydev, 0xa003);
-	if (val < 0) {
-		printk(KERN_INFO "yt8521_config: read 0xa003 error!\n");
-		return val;
-	}
-	val |= 0x3;
-	ret = ytphy_write_ext(phydev, 0xa003, val);
+	ret = ytphy_modify_ext(phydev, 0xa003, 0x3, 0x3);
 	if (ret < 0) {
-		printk(KERN_INFO "yt8521_config: set 0xa003 error!\n");
+		phydev_info(phydev, "yt8521_config: set 0xa003 error!\n");
 		return ret;
 	}
 
 	/* disable rx delay */
-	val = ytphy_read_ext(phydev, 0xa001);
-	if (val < 0) {
-		printk(KERN_INFO "yt8521_config: read 0xa001 error!\n");
-		return val;
-	}
-	val &= ~(1<<8);
-	ret = ytphy_write_ext(phydev, 0xa001, val);
+	ret = ytphy_modify_ext(phydev, 0xa001, BIT(8), 0);
 	if (ret < 0) {
-		printk(KERN_INFO "yt8521_config: failed to disable rx_delay!\n");
+		phydev_info(phydev, "yt8521_config: failed to disable rx_delay!\n");
 		return ret;
 	}
 
@@ -402,19 +341,10 @@ static int yt8521_config_init(struct phy_device *phydev)
 	if (ret < 0)
 		return ret;
 
-	val = ytphy_read_ext(phydev, YT8511_EXT_CLK_GATE);
-	if (val < 0)
-		return val;
-	val &= ~(1 << 12);
-	ret = ytphy_write_ext(phydev, YT8511_EXT_CLK_GATE, val);
-	if (ret < 0)
-		return ret;
-
-	return ret;
+	return ytphy_modify_ext(phydev, YT8511_EXT_CLK_GATE, BIT(12), 0);
 }
 
-/*
- * for fiber mode, there is no 10M speed mode and
+/* for fiber mode, there is no 10M speed mode and
  * this function is for this purpose.
  */
 static int yt8521_adjust_status(struct phy_device *phydev, int val, int is_utp)
@@ -450,8 +380,8 @@ static int yt8521_adjust_status(struct phy_device *phydev, int val, int is_utp)
 static int yt8521_read_status(struct phy_device *phydev)
 {
 	int ret;
-	volatile int val;
-	volatile int link;
+	int val;
+	int link;
 	int link_utp = 0;
 
 	/* reading UTP */
@@ -481,61 +411,44 @@ static int yt8521_read_status(struct phy_device *phydev)
 	return 0;
 }
 
-int yt8521_suspend(struct phy_device *phydev)
+static int yt8521_suspend(struct phy_device *phydev)
 {
-#if !(SYS_WAKEUP_BASED_ON_ETH_PKT)
-	int value;
-
+#if !SYS_WAKEUP_BASED_ON_ETH_PKT
 	ytphy_write_ext(phydev, 0xa000, 0);
-	value = phy_read(phydev, MII_BMCR);
-	phy_write(phydev, MII_BMCR, value | BMCR_PDOWN);
+	phy_modify(phydev, MII_BMCR, BMCR_PDOWN, BMCR_PDOWN);
 
 	ytphy_write_ext(phydev, 0xa000, 2);
-	value = phy_read(phydev, MII_BMCR);
-	phy_write(phydev, MII_BMCR, value | BMCR_PDOWN);
+	phy_modify(phydev, MII_BMCR, BMCR_PDOWN, BMCR_PDOWN);
 
 	ytphy_write_ext(phydev, 0xa000, 0);
-#endif /*!(SYS_WAKEUP_BASED_ON_ETH_PKT)*/
+#endif /* !SYS_WAKEUP_BASED_ON_ETH_PKT */
 
 	return 0;
 }
 
-int yt8521_resume(struct phy_device *phydev)
+static int yt8521_resume(struct phy_device *phydev)
 {
-#if !(SYS_WAKEUP_BASED_ON_ETH_PKT)
-	int value;
+#if !SYS_WAKEUP_BASED_ON_ETH_PKT
 	int ret;
 
 	ytphy_write_ext(phydev, 0xa000, 0);
-	value = phy_read(phydev, MII_BMCR);
-	phy_write(phydev, MII_BMCR, value & ~BMCR_PDOWN);
+	phy_modify(phydev, MII_BMCR, BMCR_PDOWN, 0);
 
 	/* disable auto sleep */
-	value = ytphy_read_ext(phydev, YT8511_EXT_SLEEP_CTRL);
-	if (value < 0)
-		return value;
-
-	value &= ~YT8521_SLEEP_SW_EN;
-	ret = ytphy_write_ext(phydev, YT8511_EXT_SLEEP_CTRL, value);
+	ret = ytphy_modify_ext(phydev, YT8511_EXT_SLEEP_CTRL, YT8521_SLEEP_SW_EN, 0);
 	if (ret < 0)
 		return ret;
 
 	/* enable RXC clock when no wire plug */
-	value = ytphy_read_ext(phydev, YT8511_EXT_CLK_GATE);
-	if (value < 0)
-		return value;
-	value &= ~(1 << 12);
-	ret = ytphy_write_ext(phydev, YT8511_EXT_CLK_GATE, value);
+	ret = ytphy_modify_ext(phydev, YT8511_EXT_CLK_GATE, BIT(12), 0);
 	if (ret < 0)
 		return ret;
 
 	ytphy_write_ext(phydev, 0xa000, 2);
-	value = phy_read(phydev, MII_BMCR);
-	phy_write(phydev, MII_BMCR, value & ~BMCR_PDOWN);
+	phy_modify(phydev, MII_BMCR, BMCR_PDOWN, 0);
 
 	ytphy_write_ext(phydev, 0xa000, 0);
-
-#endif /*!(SYS_WAKEUP_BASED_ON_ETH_PKT)*/
+#endif /* !SYS_WAKEUP_BASED_ON_ETH_PKT */
 
 	return 0;
 }
@@ -552,19 +465,20 @@ static struct phy_driver motorcomm_phy_drvs[] = {
 	},
 	{
 		PHY_ID_MATCH_EXACT(PHY_ID_YT8521),
-		.name 		= "YT8521 Gigabit Ethernet",
-		.phy_id_mask 	= MOTORCOMM_PHY_ID_MASK,
-		.flags 		= PHY_POLL,
+		.name		= "YT8521 Gigabit Ethernet",
+		.flags		= PHY_POLL,
 		.soft_reset	= yt8521_soft_reset,
-		.config_aneg 	= genphy_config_aneg,
+		.config_aneg	= genphy_config_aneg,
 		.aneg_done	= genphy_aneg_done,
-		.config_init 	= yt8521_config_init,
-		.read_status 	= yt8521_read_status,
-		.suspend 	= yt8521_suspend,
-		.resume 	= yt8521_resume,
-#if (YTPHY_ENABLE_WOL)
-		.get_wol	= &ytphy_get_wol,
-		.set_wol	= &ytphy_set_wol,
+		.config_init	= yt8521_config_init,
+		.read_status	= yt8521_read_status,
+		.suspend	= yt8521_suspend,
+		.resume		= yt8521_resume,
+		.read_page	= yt8511_read_page,
+		.write_page	= yt8511_write_page,
+#if YTPHY_ENABLE_WOL
+		.get_wol	= ytphy_get_wol,
+		.set_wol	= ytphy_set_wol,
 #endif
 	},
 };
